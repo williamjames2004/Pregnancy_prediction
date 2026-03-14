@@ -1,13 +1,18 @@
 from flask import Flask, request, jsonify
 import joblib
 import pandas as pd
+import os
 
 # ----------------------------
 # Load Model
 # ----------------------------
-model = joblib.load("pregnancy_model.pkl")
-
 app = Flask(__name__)
+
+# Safe model path
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(BASE_DIR, "pregnancy_model.pkl")
+
+model = joblib.load(model_path)
 
 # ----------------------------
 # Home Route
