@@ -17,7 +17,7 @@ df = pd.read_excel("sample_dataset.xlsx")
 # 2️⃣ Separate Features & Target
 # ---------------------------
 X = df.drop("Outcome", axis=1)
-y = df["Outcome"]  # Keep as string (Normal/Complex)
+y = df["Outcome"]   # Normal / Complex
 
 # ---------------------------
 # 3️⃣ Define Column Groups
@@ -46,29 +46,44 @@ ordinal_features = ["Activity", "Protein"]
 nominal_features = ["Thyroid"]
 
 # ---------------------------
-# 4️⃣ Define Encoders
+# 4️⃣ Define Encoders (SAFE)
 # ---------------------------
 
-ordinal_encoder = OrdinalEncoder(categories=[
-    ["Low", "Moderate", "High"],      # Activity
-    ["Low", "Adequate", "High"]       # Protein
-])
+ordinal_encoder = OrdinalEncoder(
+    categories=[
+        ["Low", "Moderate", "High"],      # Activity
+        ["Low", "Adequate", "High"]       # Protein
+    ],
+    handle_unknown="use_encoded_value",
+    unknown_value=-1
+)
 
-binary_encoder = OrdinalEncoder(categories=[
-    ["No", "Yes"]
-])
+binary_encoder = OrdinalEncoder(
+    categories=[["No", "Yes"]],
+    handle_unknown="use_encoded_value",
+    unknown_value=-1
+)
+
+nominal_encoder = OneHotEncoder(
+    drop="first",
+    handle_unknown="ignore"
+)
+
+# ---------------------------
+# 5️⃣ Preprocessor
+# ---------------------------
 
 preprocessor = ColumnTransformer(
     transformers=[
         ("num", "passthrough", numeric_features),
         ("bin", binary_encoder, binary_features),
         ("ord", ordinal_encoder, ordinal_features),
-        ("nom", OneHotEncoder(drop="first"), nominal_features)
+        ("nom", nominal_encoder, nominal_features)
     ]
 )
 
 # ---------------------------
-# 5️⃣ Create Pipeline
+# 6️⃣ Create Pipeline
 # ---------------------------
 
 pipeline = Pipeline(steps=[
@@ -77,27 +92,35 @@ pipeline = Pipeline(steps=[
 ])
 
 # ---------------------------
-# 6️⃣ Train-Test Split
+# 7️⃣ Train-Test Split
 # ---------------------------
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
 )
 
 # ---------------------------
-# 7️⃣ Train Model
+# 8️⃣ Train Model
 # ---------------------------
 
 pipeline.fit(X_train, y_train)
 
-# Save entire pipeline
+# Save trained pipeline
 joblib.dump(pipeline, "pregnancy_model.pkl")
 
+print("Model trained and saved successfully!")
+
 # ---------------------------
-# 8️⃣ Evaluate Model
+# 9️⃣ Evaluate Model
 # ---------------------------
 
 y_pred = pipeline.predict(X_test)
+
+print("\nModel Performance\n")
 
 print("Accuracy :", accuracy_score(y_test, y_pred))
 print("Precision:", precision_score(y_test, y_pred, pos_label="Complex"))
