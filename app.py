@@ -4,41 +4,27 @@ import pandas as pd
 import os
 from flask_cors import CORS
 import random
+import smtplib
+from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash
+from routes import user_routes
+from models import users_collection
 
 app = Flask(__name__)
 CORS(app)
-# ----------------------------
-# Load Model
-# ----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(BASE_DIR, "pregnancy_model.pkl")
+model_path = os.path.join(BASE_DIR, "pregnancy_risk_model.pkl")
 
 model = joblib.load(model_path)
 
-# Expected column order
-EXPECTED_COLUMNS = [
-    "Age", "Ht", "Wt",
-    "Systolic Blood Pressure",
-    "Diastolic Blood Pressure",
-    "Hemoglobin",
-    "Heart Disease",
-    "Asthma",
-    "Previous_complicated_status",
-    "Previous_misscarraige",
-    "Gestational Age",
-    "Sleep",
-    "Stress",
-    "Water",
-    "Junk",
-    "Multiple_babies",
-    "Activity",
-    "Protein",
-    "Thyroid"
-]
-
-# ----------------------------
-# Home Route
-# ----------------------------
+MODEL_COLUMNS = [
+    "Age",
+    "SystolicBP",
+    "DiastolicBP",
+    "BS",
+    "BodyTemp",
+    "HeartRate"
+]    
 
 def generate_tips(data):
 
@@ -198,57 +184,150 @@ def generate_tips(data):
 @app.route("/")
 def home():
     return "Pregnancy Risk Prediction API is running!"
-
-# ----------------------------
-# Prediction Route
 # ----------------------------
 @app.route("/predict", methods=["POST"])
 def predict():
-
     try:
         data = request.get_json()
 
-        # Convert JSON to DataFrame
-        df = pd.DataFrame([data])
+        full_data = data
 
-        # Ensure correct column order
-        df = df.reindex(columns=EXPECTED_COLUMNS)
+        model_input = {col: data.get(col, 0) for col in MODEL_COLUMNS}
 
-        # Convert numeric columns safely
-        numeric_cols = [
-            "Age","Ht","Wt","Systolic Blood Pressure","Diastolic Blood Pressure",
-            "Hemoglobin","Heart Disease","Asthma","Previous_complicated_status",
-            "Previous_misscarraige","Gestational Age","Sleep","Stress","Water","Junk"
-        ]
+        df = pd.DataFrame([model_input])
 
-        for col in numeric_cols:
+        # Convert numeric safely
+        for col in MODEL_COLUMNS:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # Fill missing values
         df.fillna(0, inplace=True)
 
-        # Prediction
         prediction = model.predict(df)[0]
-        probability = model.predict_proba(df)[0][1]
 
-        result = "Normal" if prediction == "Normal" else "Complex"
-        tips, general_tips = generate_tips(data)
+        probabilities = model.predict_proba(df)[0]
+        classes = model.classes_
+        prob_dict = {
+            classes[i]: round(probabilities[i] * 100, 2)
+            for i in range(len(classes))
+        }
+        confidence = prob_dict[prediction]
+
+        tips, general_tips = generate_tips(full_data)
 
         return jsonify({
-            "prediction": result,
-            "risk_probability": round(probability * 100, 2),
+            "prediction": prediction,   # low risk / mid risk / high risk
+            "confidence": confidence,
+            "probabilities": prob_dict,
             "tips": tips,
             "general_tips": general_tips
         })
 
     except Exception as e:
-
         return jsonify({
             "error": str(e),
             "message": "Invalid input format"
         }), 400
+    
+otp_store = {}
+def send_email(to_email, otp):
+    sender_email = "williamjames4219@gmail.com"
+    sender_password = "fnev gzan hxuy txnw"
 
+    subject = "Your OTP Code"
+    body = f"Your OTP is {otp}. It will expire in 5 minutes."
 
+    message = f"Subject: {subject}\n\n{body}"
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, to_email, message)
+
+@app.route('/send-otp', methods=['POST'])
+def send_otp():
+    data = request.json
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+
+    otp = str(random.randint(100000, 999999))
+
+    otp_store[email] = {
+        "otp": otp,
+        "expires": datetime.now() + timedelta(minutes=5)
+    }
+
+    send_email(email, otp)
+
+    return jsonify({"message": "OTP sent successfully"})
+
+@app.route('/verify-otp', methods=['POST'])
+def verify_otp():
+    data = request.json
+    email = data.get("email")
+    user_otp = data.get("otp")
+
+    record = otp_store.get(email)
+
+    if not record:
+        return jsonify({"error": "No OTP found"}), 400
+
+    if datetime.now() > record["expires"]:
+        return jsonify({"error": "OTP expired"}), 400
+
+    if record["otp"] != user_otp:
+        return jsonify({"error": "Invalid OTP"}), 400
+
+    # Mark as verified
+    record["verified"] = True
+
+    return jsonify({"message": "OTP verified"})
+
+users = {
+    "test@gmail.com": {
+        "password": "old_hash"
+    }
+}
+
+@app.route('/reset-password', methods=['POST'])
+def reset_password():
+    data = request.json
+    email = data.get("email")
+    new_password = data.get("password")
+    confirm_password = data.get("confirm_password")
+
+    if not email or not new_password or not confirm_password:
+        return jsonify({"error": "All fields are required"}), 400
+
+    if new_password != confirm_password:
+        return jsonify({"error": "Passwords do not match"}), 400
+
+    # ✅ Check OTP verification
+    record = otp_store.get(email)
+    if not record or not record.get("verified"):
+        return jsonify({"error": "OTP not verified"}), 400
+
+    # 🔍 Find user in MongoDB
+    user = users_collection.find_one({"email": email})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # 🔐 Hash password
+    hashed_password = generate_password_hash(new_password)
+
+    # 🔄 Update password in DB
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"password": hashed_password}}
+    )
+
+    # 🧹 Clear OTP
+    otp_store.pop(email, None)
+
+    return jsonify({"message": "Password reset successful"})
+
+app.register_blueprint(user_routes, url_prefix="/users")
 # ----------------------------
 # Run App
 # ----------------------------
