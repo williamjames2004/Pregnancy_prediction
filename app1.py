@@ -7,20 +7,38 @@ import random
 
 app = Flask(__name__)
 CORS(app)
+# ----------------------------
+# Load Model
+# ----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(BASE_DIR, "risk_model.pkl")
+model_path = os.path.join(BASE_DIR, "pregnancy_model.pkl")
 
 model = joblib.load(model_path)
 
 # Expected column order
-MODEL_COLUMNS = [
-    "Age",
-    "SystolicBP",
-    "DiastolicBP",
-    "BS",
-    "BodyTemp",
-    "HeartRate"
+EXPECTED_COLUMNS = [
+    "Age", "Ht", "Wt",
+    "Systolic Blood Pressure",
+    "Diastolic Blood Pressure",
+    "Hemoglobin",
+    "Heart Disease",
+    "Asthma",
+    "Previous_complicated_status",
+    "Previous_misscarraige",
+    "Gestational Age",
+    "Sleep",
+    "Stress",
+    "Water",
+    "Junk",
+    "Multiple_babies",
+    "Activity",
+    "Protein",
+    "Thyroid"
 ]
+
+# ----------------------------
+# Home Route
+# ----------------------------
 
 def generate_tips(data):
 
@@ -181,45 +199,58 @@ def generate_tips(data):
 def home():
     return "Pregnancy Risk Prediction API is running!"
 
+# ----------------------------
+# Prediction Route
+# ----------------------------
 @app.route("/predict", methods=["POST"])
 def predict():
+
     try:
         data = request.get_json()
-        full_data = data
-        model_input = {col: data.get(col, 0) for col in MODEL_COLUMNS}
 
-        df = pd.DataFrame([model_input])
+        # Convert JSON to DataFrame
+        df = pd.DataFrame([data])
 
-        # Convert numeric safely
-        for col in MODEL_COLUMNS:
+        # Ensure correct column order
+        df = df.reindex(columns=EXPECTED_COLUMNS)
+
+        # Convert numeric columns safely
+        numeric_cols = [
+            "Age","Ht","Wt","Systolic Blood Pressure","Diastolic Blood Pressure",
+            "Hemoglobin","Heart Disease","Asthma","Previous_complicated_status",
+            "Previous_misscarraige","Gestational Age","Sleep","Stress","Water","Junk"
+        ]
+
+        for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+        # Fill missing values
         df.fillna(0, inplace=True)
+
+        # Prediction
         prediction = model.predict(df)[0]
+        probability = model.predict_proba(df)[0][1]
 
-        # If using DecisionTreeClassifier with 3 classes
-        probabilities = model.predict_proba(df)[0]
-
-        classes = model.classes_
-        prob_dict = {
-            classes[i]: round(probabilities[i] * 100, 2)
-            for i in range(len(classes))
-        }
-
-        tips, general_tips = generate_tips(full_data)
+        result = "Normal" if prediction == "Normal" else "Complex"
+        tips, general_tips = generate_tips(data)
 
         return jsonify({
-            "prediction": prediction,   
-            "probabilities": prob_dict,
+            "prediction": result,
+            "risk_probability": round(probability * 100, 2),
             "tips": tips,
             "general_tips": general_tips
         })
 
     except Exception as e:
+
         return jsonify({
             "error": str(e),
             "message": "Invalid input format"
         }), 400
 
+
+# ----------------------------
+# Run App
+# ----------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
