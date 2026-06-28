@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from models import users_collection
 import re
 import bcrypt
+import uuid
 
 user_routes = Blueprint("user_routes", __name__)
 
@@ -41,7 +42,10 @@ def register():
 
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
 
+        user_id = str(uuid.uuid4())
+
         users_collection.insert_one({
+            "userId": user_id,
             "name": name,
             "email": email,
             "phoneno": phoneno,
