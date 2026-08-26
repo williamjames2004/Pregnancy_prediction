@@ -28,22 +28,26 @@ MODEL_COLUMNS = [
 
 def generate_tips(data):
 
-    tips = []
+    tips      = []
+    age       = int(data.get("age", 0))
+    bs        = int(data.get("bs", 0))
+    bodytemp  = int(data.get("bodytemp", 0))
+    heartrate = int(data.get("heartrate", 0))
 
-    sleep = int(data.get("Sleep", 0))
-    stress = int(data.get("Stress", 0))
-    water = int(data.get("Water", 0))
-    junk = int(data.get("Junk", 0))
-    hemo = int(data.get("Hemoglobin", 0))
-    sys = int(data.get("Systolic Blood Pressure", 0))
-    dia = int(data.get("Diastolic Blood Pressure", 0))
-    gest = int(data.get("Gestational Age", 0))
+    sleep     = int(data.get("sleep", 0))
+    stress    = int(data.get("stress", 0))
+    water     = int(data.get("water", 0))
+    junk      = int(data.get("junk", 0))
+    hemo      = int(data.get("homoglobin", 0))
+    sys       = int(data.get("sbp", 0))
+    dia       = int(data.get("dbp", 0))
+    gest      = int(data.get("gestationalage", 0))
 
-    heart = int(data.get("Heart Disease", 0))
-    asthma = int(data.get("Asthma", 0))
+    heart     = int(data.get("heartdisease", 0))
+    asthma    = int(data.get("asthma", 0))
 
-    activity = data.get("Activity", "")
-    protein = data.get("Protein", "")
+    activity  = data.get("activity", "")
+    protein   = data.get("protein", "")
 
     # 1️⃣ Sleep
     if sleep < 6:
@@ -190,32 +194,97 @@ def predict():
     try:
         data = request.get_json()
 
-        full_data = data
+        if not data:
+            return jsonify({
+                "error": "Request body is empty"
+            }), 400
 
-        model_input = {col: data.get(col, 0) for col in MODEL_COLUMNS}
+        # -----------------------------------
+        # Required fields for ML prediction
+        # -----------------------------------
+
+        required_fields = [
+            "age",
+            "sbp",
+            "dbp",
+            "bs",
+            "bodytemp",
+            "heartrate"
+        ]
+
+        missing_fields = [
+            field
+            for field in required_fields
+            if field not in data or data[field] in [None, ""]
+        ]
+
+        if missing_fields:
+            return jsonify({
+                "error": "Missing required prediction fields",
+                "missing_fields": missing_fields
+            }), 400
+
+        # -----------------------------------
+        # Prepare ONLY the 6 ML parameters
+        # -----------------------------------
+
+        model_input = {
+            "Age": data["age"],
+            "SystolicBP": data["sbp"],
+            "DiastolicBP": data["dbp"],
+            "BS": data["bs"],
+            "BodyTemp": data["bodytemp"],
+            "HeartRate": data["heartrate"]
+        }
 
         df = pd.DataFrame([model_input])
 
-        # Convert numeric safely
+        # Convert values to numeric
         for col in MODEL_COLUMNS:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            )
 
-        df.fillna(0, inplace=True)
+        # Check invalid values
+        if df[MODEL_COLUMNS].isnull().any().any():
+            return jsonify({
+                "error": "Prediction parameters must be numeric"
+            }), 400
+
+        # -----------------------------------
+        # ML Prediction
+        # -----------------------------------
 
         prediction = model.predict(df)[0]
 
         probabilities = model.predict_proba(df)[0]
+
         classes = model.classes_
+
         prob_dict = {
-            classes[i]: round(probabilities[i] * 100, 2)
+            str(classes[i]): round(
+                probabilities[i] * 100,
+                2
+            )
             for i in range(len(classes))
         }
-        confidence = prob_dict[prediction]
 
-        tips, general_tips = generate_tips(full_data)
+        confidence = prob_dict[str(prediction)]
+
+        # -----------------------------------
+        # Generate health tips
+        # using ALL Flutter data
+        # -----------------------------------
+
+        tips, general_tips = generate_tips(data)
+
+        # -----------------------------------
+        # Response
+        # -----------------------------------
 
         return jsonify({
-            "prediction": prediction,   # low risk / mid risk / high risk
+            "prediction": str(prediction),
             "confidence": confidence,
             "probabilities": prob_dict,
             "tips": tips,
